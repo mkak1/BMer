@@ -1,0 +1,82 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from app import create_app
+
+
+class BookmarkApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.app = create_app({
+            "TESTING": True,
+            "DATABASE": str(Path(self.temp_dir.name) / "test.sqlite"),
+        })
+        self.client = self.app.test_client()
+        self.state = self.client.get("/api/state").get_json()
+        self.design = next(item for item in self.state["categories"] if item["name"] == "Design")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_creates_updates_and_deletes_bookmarks(self):
+        response = self.client.post("/api/bookmarks", json={
+            "title": "Example",
+            "url": "example.com/path",
+            "categoryId": self.design["id"],
+        })
+        self.assertEqual(response.status_code, 201)
+        bookmark = response.get_json()
+        self.assertEqual(bookmark["url"], "https://example.com/path")
+
+        response = self.client.put(f"/api/bookmarks/{bookmark['id']}", json={
+            "title": "Updated",
+            "url": "https://example.org",
+            "categoryId": self.design["id"],
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["title"], "Updated")
+
+        response = self.client.delete(f"/api/bookmarks/{bookmark['id']}")
+        self.assertEqual(response.status_code, 204)
+
+    def test_rejects_unsafe_urls_and_duplicate_categories(self):
+        response = self.client.post("/api/bookmarks", json={
+            "title": "Unsafe",
+            "url": "javascript:alert(1)",
+            "categoryId": self.design["id"],
+        })
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.post("/api/categories", json={"name": "Design"})
+        self.assertEqual(response.status_code, 409)
+
+    def test_persists_category_creation_order_and_collapse(self):
+        created = self.client.post("/api/categories", json={"name": "Research"})
+        self.assertEqual(created.status_code, 201)
+        category_id = created.get_json()["id"]
+        category_ids = [item["id"] for item in self.state["categories"]] + [category_id]
+
+        response = self.client.patch("/api/categories/order", json={"ids": list(reversed(category_ids))})
+        self.assertEqual(response.status_code, 200)
+        response = self.client.patch(f"/api/categories/{category_id}/collapsed", json={"collapsed": True})
+        self.assertEqual(response.status_code, 200)
+
+        state = self.client.get("/api/state").get_json()
+        self.assertEqual([item["id"] for item in state["categories"]], list(reversed(category_ids)))
+        self.assertTrue(next(item for item in state["categories"] if item["id"] == category_id)["collapsed"])
+
+    def test_rejects_incomplete_category_order(self):
+        response = self.client.patch("/api/categories/order", json={"ids": []})
+        self.assertEqual(response.status_code, 400)
+
+    def test_serves_dashboard_and_security_headers(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("/static/js/app.js", response.get_data(as_text=True))
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+
+
+if __name__ == "__main__":
+    unittest.main()
