@@ -3,7 +3,7 @@ const state = {
   bookmarks: [],
   searchTerm: "",
   editingBookmarkId: null,
-  draggedCategoryId: null,
+  pointerDrag: null,
 };
 
 const board = document.querySelector("#categoryBoard");
@@ -50,7 +50,10 @@ function filteredBookmarks(categoryId) {
     if (bookmark.category_id !== categoryId) return false;
     if (!term) return true;
     return `${bookmark.title} ${bookmark.url} ${bookmark.category}`.toLowerCase().includes(term);
-  });
+  }).sort((left, right) => left.title.localeCompare(right.title, undefined, {
+    sensitivity: "base",
+    numeric: true,
+  }));
 }
 
 function render() {
@@ -59,8 +62,6 @@ function render() {
     return `${bookmark.title} ${bookmark.url} ${bookmark.category}`.toLowerCase().includes(state.searchTerm);
   });
 
-  document.querySelector("#bookmarkCount").textContent = String(visibleBookmarks.length);
-  document.querySelector("#categoryCount").textContent = String(state.categories.length);
   document.querySelector("#resultSummary").textContent = state.searchTerm
     ? `${visibleBookmarks.length} matching ${visibleBookmarks.length === 1 ? "bookmark" : "bookmarks"}`
     : `${state.bookmarks.length} saved ${state.bookmarks.length === 1 ? "link" : "links"}`;
@@ -72,7 +73,16 @@ function render() {
     return option;
   }));
 
-  board.replaceChildren(...state.categories.map((category) => renderCategory(category)));
+  const matchingCategories = state.categories
+    .map((category, index) => ({ category, index, matchCount: filteredBookmarks(category.id).length }))
+    .filter(({ matchCount }) => !state.searchTerm || matchCount > 0)
+    .sort((left, right) => state.searchTerm
+      ? right.matchCount - left.matchCount || left.index - right.index
+      : left.index - right.index)
+    .map(({ category }) => category);
+
+  board.replaceChildren(...matchingCategories.map((category) => renderCategory(category)));
+  board.classList.toggle("is-searching", Boolean(state.searchTerm));
   board.setAttribute("aria-busy", "false");
 }
 
@@ -82,7 +92,6 @@ function renderCategory(category) {
   card.className = "category-card";
   card.dataset.categoryId = category.id;
   card.style.setProperty("--card-accent", category.color);
-  card.classList.toggle("is-collapsed", Boolean(category.collapsed));
 
   const header = document.createElement("div");
   header.className = "category-header";
@@ -101,26 +110,11 @@ function renderCategory(category) {
   const count = document.createElement("span");
   count.className = "count-pill";
   count.textContent = String(items.length);
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "category-toggle icon-button";
-  toggle.dataset.action = "toggle";
-  toggle.setAttribute("aria-expanded", String(!category.collapsed));
-  toggle.setAttribute("aria-label", `${category.collapsed ? "Expand" : "Collapse"} ${category.name}`);
-  toggle.title = toggle.getAttribute("aria-label");
-  toggle.textContent = category.collapsed ? "+" : "−";
-  const dragHandle = document.createElement("button");
-  dragHandle.type = "button";
-  dragHandle.className = "drag-handle icon-button";
-  dragHandle.draggable = true;
-  dragHandle.setAttribute("aria-label", `Reorder ${category.name}`);
-  dragHandle.title = "Drag to reorder";
-  dragHandle.textContent = "⠿";
-  headerActions.append(count, toggle, dragHandle);
+  headerActions.append(count);
   header.append(titleWrap, headerActions);
 
   const body = document.createElement("div");
-  body.className = `category-body ${category.collapsed ? "hidden" : "visible"}`;
+  body.className = "category-body visible";
   if (items.length) {
     const list = document.createElement("ul");
     list.className = "bookmark-list";
@@ -132,6 +126,15 @@ function renderCategory(category) {
     empty.textContent = state.searchTerm ? "No bookmarks match this search." : "No bookmarks in this category yet.";
     body.append(empty);
   }
+
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "category-add-button";
+  addButton.dataset.action = "add-bookmark";
+  addButton.setAttribute("aria-label", `Add bookmark to ${category.name}`);
+  addButton.title = `Add bookmark to ${category.name}`;
+  addButton.textContent = "+";
+  body.append(addButton);
 
   card.append(header, body);
   return card;
@@ -250,7 +253,7 @@ async function migrateLegacyState() {
   showToast("Your existing bookmarks were imported.");
 }
 
-function openModal(bookmark = null) {
+function openModal(bookmark = null, categoryId = null) {
   state.editingBookmarkId = bookmark?.id ?? null;
   document.querySelector("#modalTitle").textContent = bookmark ? "Edit bookmark" : "Add bookmark";
   document.querySelector("#submitBookmarkBtn").textContent = bookmark ? "Save changes" : "Add bookmark";
@@ -258,6 +261,7 @@ function openModal(bookmark = null) {
   document.querySelector("#bookmarkUrl").value = bookmark?.url ?? "";
   document.querySelector("#newCategoryInput").value = "";
   if (bookmark) categorySelect.value = bookmark.category_id;
+  else if (categoryId !== null) categorySelect.value = categoryId;
   bookmarkModal.hidden = false;
   bookmarkModal.setAttribute("aria-hidden", "false");
   document.querySelector("#bookmarkTitle").focus();
@@ -270,7 +274,6 @@ function closeModal() {
   state.editingBookmarkId = null;
 }
 
-document.querySelector("#addBookmarkBtn").addEventListener("click", () => openModal());
 document.querySelector("#closeModalBtn").addEventListener("click", closeModal);
 document.querySelector("#cancelBtn").addEventListener("click", closeModal);
 bookmarkModal.addEventListener("click", (event) => {
@@ -316,14 +319,8 @@ board.addEventListener("click", async (event) => {
   const categoryId = Number(card?.dataset.categoryId);
 
   try {
-    if (action.dataset.action === "toggle") {
-      const category = state.categories.find((item) => item.id === categoryId);
-      category.collapsed = category.collapsed ? 0 : 1;
-      render();
-      await api(`/api/categories/${categoryId}/collapsed`, {
-        method: "PATCH",
-        body: JSON.stringify({ collapsed: Boolean(category.collapsed) }),
-      });
+    if (action.dataset.action === "add-bookmark") {
+      openModal(null, categoryId);
     } else if (action.dataset.action === "edit") {
       const bookmark = state.bookmarks.find((item) => item.id === Number(action.dataset.bookmarkId));
       if (bookmark) openModal(bookmark);
@@ -370,59 +367,167 @@ document.querySelector("#newCategoryInput").addEventListener("keydown", (event) 
   }
 });
 
-board.addEventListener("dragstart", (event) => {
+board.addEventListener("pointerdown", (event) => {
+  if (state.searchTerm) return;
+  const header = event.target.closest(".category-header");
   const handle = event.target.closest(".drag-handle");
-  if (!handle) {
-    event.preventDefault();
-    return;
+  if (!header || (event.target.closest("button") && !handle) || event.button !== 0) return;
+  event.preventDefault();
+  board.classList.add("is-reordering");
+  window.getSelection()?.removeAllRanges();
+  const card = header.closest(".category-card");
+  state.pointerDrag = {
+    pointerId: event.pointerId,
+    categoryId: Number(card.dataset.categoryId),
+    card,
+    startX: event.clientX,
+    startY: event.clientY,
+    offsetX: event.clientX - card.getBoundingClientRect().left,
+    offsetY: event.clientY - card.getBoundingClientRect().top,
+    latestX: event.clientX,
+    latestY: event.clientY,
+    frameId: null,
+    active: false,
+  };
+});
+
+document.addEventListener("pointermove", (event) => {
+  const drag = state.pointerDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  drag.latestX = event.clientX;
+  drag.latestY = event.clientY;
+  if (drag.frameId === null) {
+    drag.frameId = requestAnimationFrame(() => updateCategoryDrag(drag));
   }
-  const card = handle.closest(".category-card");
-  state.draggedCategoryId = Number(card.dataset.categoryId);
-  event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("text/plain", String(state.draggedCategoryId));
-  card.classList.add("dragging");
 });
 
-board.addEventListener("dragover", (event) => {
-  const card = event.target.closest(".category-card");
-  if (!card || Number(card.dataset.categoryId) === state.draggedCategoryId) return;
-  event.preventDefault();
-  card.classList.add("drag-target");
+document.addEventListener("pointerup", async (event) => {
+  const drag = state.pointerDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  drag.latestX = event.clientX;
+  drag.latestY = event.clientY;
+  if (drag.frameId !== null) cancelAnimationFrame(drag.frameId);
+  drag.frameId = null;
+  updateCategoryDrag(drag);
+  state.pointerDrag = null;
+  board.classList.remove("is-reordering");
+  if (!drag.active) return;
+
+  drag.preview.remove();
+  drag.placeholder.replaceWith(drag.card);
+  drag.card.hidden = false;
+  const order = [...board.children]
+    .filter((element) => element.classList.contains("category-card"))
+    .map((card) => Number(card.dataset.categoryId));
+  await persistCategoryOrder(order);
 });
 
-board.addEventListener("dragleave", (event) => {
-  const card = event.target.closest(".category-card");
-  if (card && !card.contains(event.relatedTarget)) card.classList.remove("drag-target");
+document.addEventListener("pointercancel", async () => {
+  const drag = state.pointerDrag;
+  state.pointerDrag = null;
+  board.classList.remove("is-reordering");
+  if (drag && drag.frameId !== null) cancelAnimationFrame(drag.frameId);
+  if (drag?.active) {
+    drag.preview.remove();
+    await loadState();
+  }
 });
 
-board.addEventListener("drop", async (event) => {
-  const target = event.target.closest(".category-card");
-  if (!target || !state.draggedCategoryId) return;
-  event.preventDefault();
-  const targetId = Number(target.dataset.categoryId);
-  const fromIndex = state.categories.findIndex((item) => item.id === state.draggedCategoryId);
-  const toIndex = state.categories.findIndex((item) => item.id === targetId);
-  if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+function beginCategoryDrag(drag) {
+  const rect = drag.card.getBoundingClientRect();
+  const placeholder = document.createElement("article");
+  placeholder.className = "category-drop-placeholder is-nearest";
+  placeholder.setAttribute("aria-hidden", "true");
+  placeholder.style.width = `${rect.width}px`;
+  placeholder.style.height = `${rect.height}px`;
+  drag.card.before(placeholder);
+  drag.card.hidden = true;
 
-  const [moved] = state.categories.splice(fromIndex, 1);
-  state.categories.splice(toIndex, 0, moved);
+  const preview = drag.card.cloneNode(true);
+  preview.hidden = false;
+  preview.classList.remove("dragging", "drag-target");
+  preview.classList.add("category-drag-preview");
+  preview.removeAttribute("data-category-id");
+  preview.setAttribute("aria-hidden", "true");
+  preview.style.width = `${rect.width}px`;
+  preview.style.left = `${drag.startX - drag.offsetX}px`;
+  preview.style.top = `${drag.startY - drag.offsetY}px`;
+  document.body.append(preview);
+
+  drag.placeholder = placeholder;
+  drag.preview = preview;
+  drag.active = true;
+  drag.card.remove();
+}
+
+function updateCategoryDrag(drag) {
+  drag.frameId = null;
+  if (!drag.active && Math.hypot(drag.latestX - drag.startX, drag.latestY - drag.startY) < 8) return;
+  if (!drag.active) beginCategoryDrag(drag);
+  drag.preview.style.setProperty("--drag-x", `${drag.latestX - drag.startX}px`);
+  drag.preview.style.setProperty("--drag-y", `${drag.latestY - drag.startY}px`);
+  positionCategoryPlaceholder(drag, drag.latestX, drag.latestY);
+}
+
+function positionCategoryPlaceholder(drag, pointerX, pointerY) {
+  const cards = [...board.querySelectorAll(".category-card:not([hidden])")]
+    .filter((card) => Number(card.dataset.categoryId) !== drag.categoryId);
+  if (!cards.length) return;
+
+  const measurements = cards.map((card) => {
+    card.getAnimations().forEach((animation) => animation.cancel());
+    return { card, rect: card.getBoundingClientRect() };
+  });
+  const nearest = measurements.reduce((best, item) => {
+    const { card, rect } = item;
+    const distance = Math.hypot(pointerX - (rect.left + rect.width / 2), pointerY - (rect.top + rect.height / 2));
+    return !best || distance < best.distance ? { ...item, distance } : best;
+  }, null);
+  const deltaX = pointerX - (nearest.rect.left + nearest.rect.width / 2);
+  const deltaY = pointerY - (nearest.rect.top + nearest.rect.height / 2);
+  const insertBefore = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX < 0 : deltaY < 0;
+  const isAlreadyPositioned = insertBefore
+    ? drag.placeholder.nextElementSibling === nearest.card
+    : drag.placeholder.previousElementSibling === nearest.card;
+  if (isAlreadyPositioned) return;
+
+  const positions = new Map(measurements.map(({ card, rect }) => [card, rect]));
+  drag.placeholder.getAnimations().forEach((animation) => animation.cancel());
+  positions.set(drag.placeholder, drag.placeholder.getBoundingClientRect());
+  if (insertBefore) nearest.card.before(drag.placeholder);
+  else nearest.card.after(drag.placeholder);
+  animateCategoryShift(positions);
+}
+
+function animateCategoryShift(previousPositions) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  for (const [card, previous] of previousPositions) {
+    const next = card.getBoundingClientRect();
+    const deltaX = previous.left - next.left;
+    const deltaY = previous.top - next.top;
+    if (!deltaX && !deltaY) continue;
+    card.getAnimations().forEach((animation) => animation.cancel());
+    card.animate(
+      [{ transform: `translate(${deltaX}px, ${deltaY}px)` }, { transform: "translate(0, 0)" }],
+      { duration: 210, easing: "cubic-bezier(0.2, 0.75, 0.25, 1)" },
+    );
+  }
+}
+
+async function persistCategoryOrder(order) {
+  const orderIndex = new Map(order.map((id, index) => [id, index]));
+  state.categories.sort((left, right) => orderIndex.get(left.id) - orderIndex.get(right.id));
   render();
+
   try {
     await api("/api/categories/order", {
-      method: "PATCH",
-      body: JSON.stringify({ ids: state.categories.map((category) => category.id) }),
+      method: "PATCH", body: JSON.stringify({ ids: order }),
     });
   } catch (error) {
     await loadState();
     showError(error.message);
   }
-});
-
-board.addEventListener("dragend", () => {
-  state.draggedCategoryId = null;
-  document.querySelectorAll(".category-card").forEach((card) => {
-    card.classList.remove("dragging", "drag-target");
-  });
-});
+}
 
 loadState();
