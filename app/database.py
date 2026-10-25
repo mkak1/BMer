@@ -96,14 +96,14 @@ def init_db():
                 (name, color, position),
             )
             used_colors.add(color)
-    elif color_schema_version < 2:
+    elif color_schema_version < 3:
         used_colors = set()
         categories = db.execute("SELECT id FROM categories ORDER BY position, id").fetchall()
         for category in categories:
             color = generate_category_color(used_colors)
             db.execute("UPDATE categories SET color = ? WHERE id = ?", (color, category["id"]))
             used_colors.add(color)
-            db.execute("PRAGMA user_version = 2")
+    db.execute("PRAGMA user_version = 3")
 
     bookmark_count = db.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0]
     if bookmark_count == 0:

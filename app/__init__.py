@@ -1,4 +1,5 @@
 import sqlite3
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
@@ -80,6 +81,46 @@ def create_app(test_config=None):
         category = db.execute("SELECT * FROM categories WHERE id = ?", (cursor.lastrowid,)).fetchone()
         return jsonify(dict(category)), 201
 
+    @app.patch("/api/categories/<int:category_id>")
+    def rename_category(category_id):
+        payload = request.get_json(silent=True) or {}
+        name = " ".join(str(payload.get("name", "")).split())
+        if not name or len(name) > 40:
+            return api_error("Category names must be between 1 and 40 characters.", 400)
+
+        db = get_db()
+        try:
+            result = db.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+            db.commit()
+        except sqlite3.IntegrityError:
+            return api_error("A category with that name already exists.", 409)
+        if result.rowcount == 0:
+            return api_error("Category not found.", 404)
+        category = db.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
+        return jsonify(dict(category))
+
+    @app.delete("/api/categories/<int:category_id>")
+    def delete_category(category_id):
+        db = get_db()
+        category = db.execute(
+            "SELECT id, name FROM categories WHERE id = ?",
+            (category_id,),
+        ).fetchone()
+        if category is None:
+            return api_error("Category not found.", 404)
+
+        bookmark_count = db.execute(
+            "SELECT COUNT(*) FROM bookmarks WHERE category_id = ?",
+            (category_id,),
+        ).fetchone()[0]
+        db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+        db.commit()
+        return jsonify({
+            "id": category_id,
+            "name": category["name"],
+            "deletedBookmarkCount": bookmark_count,
+        })
+
     @app.patch("/api/categories/order")
     def update_category_order():
         payload = request.get_json(silent=True) or {}
@@ -107,6 +148,23 @@ def create_app(test_config=None):
         if result.rowcount == 0:
             return api_error("Category not found.", 404)
         return jsonify({"id": category_id, "collapsed": collapsed})
+
+    @app.patch("/api/categories/<int:category_id>/color")
+    def update_category_color(category_id):
+        payload = request.get_json(silent=True) or {}
+        color = str(payload.get("color", ""))
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None:
+            return api_error("Color must be a six-digit hexadecimal value.", 400)
+
+        db = get_db()
+        result = db.execute(
+            "UPDATE categories SET color = ? WHERE id = ?",
+            (color.lower(), category_id),
+        )
+        db.commit()
+        if result.rowcount == 0:
+            return api_error("Category not found.", 404)
+        return jsonify({"id": category_id, "color": color.lower()})
 
     @app.post("/api/bookmarks")
     def create_bookmark():

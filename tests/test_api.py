@@ -82,6 +82,59 @@ class BookmarkApiTests(unittest.TestCase):
         response = self.client.patch("/api/categories/order", json={"ids": []})
         self.assertEqual(response.status_code, 400)
 
+    def test_updates_category_color_and_rejects_invalid_values(self):
+        response = self.client.patch(
+            f"/api/categories/{self.design['id']}/color",
+            json={"color": "#1122AA"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["color"], "#1122aa")
+
+        state = self.client.get("/api/state").get_json()
+        updated = next(item for item in state["categories"] if item["id"] == self.design["id"])
+        self.assertEqual(updated["color"], "#1122aa")
+
+        response = self.client.patch(
+            f"/api/categories/{self.design['id']}/color",
+            json={"color": "red"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_renames_category_and_rejects_duplicate_names(self):
+        response = self.client.patch(
+            f"/api/categories/{self.design['id']}",
+            json={"name": "Visual Design"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["name"], "Visual Design")
+
+        state = self.client.get("/api/state").get_json()
+        renamed = next(item for item in state["categories"] if item["id"] == self.design["id"])
+        self.assertEqual(renamed["name"], "Visual Design")
+        self.assertEqual(renamed["color"], self.design["color"])
+
+        response = self.client.patch(
+            f"/api/categories/{self.design['id']}",
+            json={"name": "Development"},
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_deletes_category_and_its_bookmarks(self):
+        created_category = self.client.post("/api/categories", json={"name": "Disposable"}).get_json()
+        bookmark = self.client.post("/api/bookmarks", json={
+            "title": "Temporary link",
+            "url": "https://example.com/temp",
+            "categoryId": created_category["id"],
+        }).get_json()
+
+        response = self.client.delete(f"/api/categories/{created_category['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["deletedBookmarkCount"], 1)
+
+        state = self.client.get("/api/state").get_json()
+        self.assertNotIn(created_category["id"], [item["id"] for item in state["categories"]])
+        self.assertNotIn(bookmark["id"], [item["id"] for item in state["bookmarks"]])
+
     def test_serves_dashboard_and_security_headers(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)

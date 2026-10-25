@@ -3,6 +3,7 @@ const state = {
   bookmarks: [],
   searchTerm: "",
   editingBookmarkId: null,
+  editingCategoryId: null,
   pointerDrag: null,
   suppressCategoryClick: false,
 };
@@ -116,27 +117,47 @@ function renderCategory(category) {
 
   const header = document.createElement("div");
   header.className = "category-header";
-  header.setAttribute("role", "button");
-  header.tabIndex = 0;
-  header.setAttribute("aria-expanded", String(!collapsed));
-  header.setAttribute("aria-controls", `category-body-${category.id}`);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "category-header-toggle";
+  toggle.dataset.action = "toggle";
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  toggle.setAttribute("aria-controls", `category-body-${category.id}`);
+
+  const titleButton = document.createElement("button");
+  titleButton.type = "button";
+  titleButton.className = "category-name-button";
+  titleButton.dataset.action = "rename-category";
+  titleButton.setAttribute("aria-label", `Rename ${category.name}`);
+  titleButton.title = "Rename category";
 
   const titleWrap = document.createElement("div");
   titleWrap.className = "header-title";
-  const colorDot = document.createElement("span");
-  colorDot.className = "category-color";
-  colorDot.setAttribute("aria-hidden", "true");
   const title = document.createElement("h3");
   title.textContent = category.name;
-  titleWrap.append(colorDot, title);
+  titleWrap.append(title);
+  titleButton.append(titleWrap);
 
-  const headerActions = document.createElement("div");
-  headerActions.className = "category-header-actions";
   const count = document.createElement("span");
   count.className = "count-pill";
   count.textContent = String(items.length);
-  headerActions.append(count);
-  header.append(titleWrap, headerActions);
+  const colorPicker = document.createElement("input");
+  colorPicker.type = "color";
+  colorPicker.className = "category-color-picker";
+  colorPicker.value = category.color;
+  colorPicker.dataset.categoryId = category.id;
+  colorPicker.setAttribute("aria-label", `Change ${category.name} tile color`);
+  colorPicker.title = `Change ${category.name} color`;
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "category-delete-button icon-button";
+  deleteButton.dataset.action = "delete-category";
+  deleteButton.setAttribute("aria-label", `Delete ${category.name} category`);
+  deleteButton.title = "Delete category";
+  deleteButton.textContent = "×";
+  toggle.append(count);
+  header.append(colorPicker, titleButton, toggle, deleteButton);
 
   const body = document.createElement("div");
   body.id = `category-body-${category.id}`;
@@ -300,8 +321,12 @@ function closeModal() {
   state.editingBookmarkId = null;
 }
 
-function openCategoryModal() {
+function openCategoryModal(category = null) {
+  state.editingCategoryId = category?.id ?? null;
   categoryForm.reset();
+  document.querySelector("#categoryModalTitle").textContent = category ? "Rename category" : "Add category";
+  document.querySelector("#submitCategoryBtn").textContent = category ? "Save name" : "Create category";
+  document.querySelector("#categoryNameInput").value = category?.name ?? "";
   categoryModal.hidden = false;
   categoryModal.setAttribute("aria-hidden", "false");
   document.querySelector("#categoryNameInput").focus();
@@ -311,6 +336,7 @@ function closeCategoryModal() {
   categoryModal.hidden = true;
   categoryModal.setAttribute("aria-hidden", "true");
   categoryForm.reset();
+  state.editingCategoryId = null;
 }
 
 document.querySelector("#closeModalBtn").addEventListener("click", closeModal);
@@ -362,6 +388,17 @@ categoryForm.addEventListener("submit", async (event) => {
   if (!name) return;
 
   try {
+    if (state.editingCategoryId !== null) {
+      await api(`/api/categories/${state.editingCategoryId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+      closeCategoryModal();
+      await loadState();
+      showToast("Category renamed.");
+      return;
+    }
+
     await createCategory(name);
     closeCategoryModal();
   } catch (error) {
@@ -371,35 +408,47 @@ categoryForm.addEventListener("submit", async (event) => {
 
 // Capture edit/delete actions in one place so cards can be re-rendered freely.
 board.addEventListener("click", async (event) => {
-  const header = event.target.closest(".category-header");
-  if (header) {
-    if (state.suppressCategoryClick) {
-      state.suppressCategoryClick = false;
-      return;
-    }
-    const category = state.categories.find((item) => item.id === Number(header.closest(".category-card").dataset.categoryId));
-    if (!category) return;
-    category.collapsed = category.collapsed ? 0 : 1;
-    render();
-    try {
-      await api(`/api/categories/${category.id}/collapsed`, {
-        method: "PATCH",
-        body: JSON.stringify({ collapsed: Boolean(category.collapsed) }),
-      });
-    } catch (error) {
-      await loadState();
-      showError(error.message);
-    }
-    return;
-  }
-
   const action = event.target.closest("[data-action]");
   if (!action) return;
   const card = action.closest(".category-card");
   const categoryId = Number(card?.dataset.categoryId);
 
   try {
-    if (action.dataset.action === "add-bookmark") {
+    if (action.dataset.action === "toggle") {
+      if (state.suppressCategoryClick) {
+        state.suppressCategoryClick = false;
+        return;
+      }
+      const category = state.categories.find((item) => item.id === categoryId);
+      if (!category) return;
+      category.collapsed = category.collapsed ? 0 : 1;
+      render();
+      try {
+        await api(`/api/categories/${category.id}/collapsed`, {
+          method: "PATCH",
+          body: JSON.stringify({ collapsed: Boolean(category.collapsed) }),
+        });
+      } catch (error) {
+        await loadState();
+        showError(error.message);
+      }
+    } else if (action.dataset.action === "rename-category") {
+      const category = state.categories.find((item) => item.id === categoryId);
+      if (category) openCategoryModal(category);
+    } else if (action.dataset.action === "delete-category") {
+      const category = state.categories.find((item) => item.id === categoryId);
+      if (!category) return;
+      const bookmarkCount = state.bookmarks.filter((item) => item.category_id === categoryId).length;
+      const message = bookmarkCount
+        ? `Delete “${category.name}” and its ${bookmarkCount} ${bookmarkCount === 1 ? "bookmark" : "bookmarks"}? This cannot be undone.`
+        : `Delete the “${category.name}” category? This cannot be undone.`;
+      if (!window.confirm(message)) return;
+      const result = await api(`/api/categories/${categoryId}`, { method: "DELETE" });
+      await loadState();
+      showToast(result.deletedBookmarkCount
+        ? `Category and ${result.deletedBookmarkCount} bookmarks deleted.`
+        : "Category deleted.");
+    } else if (action.dataset.action === "add-bookmark") {
       openModal(null, categoryId);
     } else if (action.dataset.action === "add-category") {
       openCategoryModal();
@@ -413,6 +462,26 @@ board.addEventListener("click", async (event) => {
       await loadState();
       showToast("Bookmark deleted.");
     }
+  } catch (error) {
+    await loadState();
+    showError(error.message);
+  }
+});
+
+board.addEventListener("change", async (event) => {
+  const picker = event.target.closest(".category-color-picker");
+  if (!picker) return;
+  const categoryId = Number(picker.dataset.categoryId);
+  const category = state.categories.find((item) => item.id === categoryId);
+  if (!category) return;
+
+  try {
+    const updated = await api(`/api/categories/${categoryId}/color`, {
+      method: "PATCH",
+      body: JSON.stringify({ color: picker.value }),
+    });
+    category.color = updated.color;
+    render();
   } catch (error) {
     await loadState();
     showError(error.message);
@@ -457,8 +526,8 @@ document.querySelector("#newCategoryInput").addEventListener("keydown", (event) 
 board.addEventListener("pointerdown", (event) => {
   if (state.searchTerm) return;
   const header = event.target.closest(".category-header");
-  const handle = event.target.closest(".drag-handle");
-  if (!header || (event.target.closest("button") && !handle) || event.button !== 0) return;
+  const toggle = event.target.closest(".category-header-toggle");
+  if (!header || (event.target.closest("button, input") && !toggle) || event.button !== 0) return;
   const card = header.closest(".category-card");
   state.pointerDrag = {
     pointerId: event.pointerId,
@@ -473,13 +542,6 @@ board.addEventListener("pointerdown", (event) => {
     frameId: null,
     active: false,
   };
-});
-
-board.addEventListener("keydown", (event) => {
-  const header = event.target.closest(".category-header[role='button']");
-  if (!header || !["Enter", " "].includes(event.key)) return;
-  event.preventDefault();
-  header.click();
 });
 
 document.addEventListener("pointermove", (event) => {
