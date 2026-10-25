@@ -138,7 +138,7 @@ class BookmarkApiTests(unittest.TestCase):
     def test_serves_dashboard_and_security_headers(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("/static/js/app.js", response.get_data(as_text=True))
+        self.assertIn("/static/js/dashboard.js", response.get_data(as_text=True))
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
 

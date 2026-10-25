@@ -1,0 +1,225 @@
+import re
+import sqlite3
+from urllib.parse import urlsplit, urlunsplit
+
+from flask import Blueprint, jsonify, request
+
+from .database import generate_category_color, get_db
+
+
+api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+
+@api_bp.get("/state")
+def get_state():
+    db = get_db()
+    categories = db.execute(
+        "SELECT id, name, color, position, collapsed FROM categories ORDER BY position, id"
+    ).fetchall()
+    bookmarks = db.execute(
+        """
+        SELECT bookmarks.id, bookmarks.title, bookmarks.url, bookmarks.category_id,
+               categories.name AS category, bookmarks.created_at
+        FROM bookmarks JOIN categories ON categories.id = bookmarks.category_id
+        ORDER BY bookmarks.created_at DESC, bookmarks.id DESC
+        """
+    ).fetchall()
+    return jsonify({
+        "categories": [dict(row) for row in categories],
+        "bookmarks": [dict(row) for row in bookmarks],
+    })
+
+
+@api_bp.post("/categories")
+def create_category():
+    payload = request.get_json(silent=True) or {}
+    name = " ".join(str(payload.get("name", "")).split())
+    if not name or len(name) > 40:
+        return api_error("Category names must be between 1 and 40 characters.", 400)
+
+    db = get_db()
+    position = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM categories").fetchone()[0]
+    existing_colors = [row[0] for row in db.execute("SELECT color FROM categories")]
+    color = generate_category_color(existing_colors)
+    try:
+        cursor = db.execute(
+            "INSERT INTO categories (name, color, position) VALUES (?, ?, ?)",
+            (name, color, position),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        return api_error("A category with that name already exists.", 409)
+    category = db.execute("SELECT * FROM categories WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return jsonify(dict(category)), 201
+
+
+@api_bp.patch("/categories/<int:category_id>")
+def rename_category(category_id):
+    payload = request.get_json(silent=True) or {}
+    name = " ".join(str(payload.get("name", "")).split())
+    if not name or len(name) > 40:
+        return api_error("Category names must be between 1 and 40 characters.", 400)
+
+    db = get_db()
+    try:
+        result = db.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+        db.commit()
+    except sqlite3.IntegrityError:
+        return api_error("A category with that name already exists.", 409)
+    if result.rowcount == 0:
+        return api_error("Category not found.", 404)
+    category = db.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
+    return jsonify(dict(category))
+
+
+@api_bp.delete("/categories/<int:category_id>")
+def delete_category(category_id):
+    db = get_db()
+    category = db.execute(
+        "SELECT id, name FROM categories WHERE id = ?",
+        (category_id,),
+    ).fetchone()
+    if category is None:
+        return api_error("Category not found.", 404)
+
+    bookmark_count = db.execute(
+        "SELECT COUNT(*) FROM bookmarks WHERE category_id = ?",
+        (category_id,),
+    ).fetchone()[0]
+    db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+    db.commit()
+    return jsonify({
+        "id": category_id,
+        "name": category["name"],
+        "deletedBookmarkCount": bookmark_count,
+    })
+
+
+@api_bp.patch("/categories/order")
+def update_category_order():
+    payload = request.get_json(silent=True) or {}
+    ids = payload.get("ids")
+    db = get_db()
+    existing = [row[0] for row in db.execute("SELECT id FROM categories ORDER BY position, id")]
+    if not isinstance(ids, list) or len(ids) != len(existing) or set(ids) != set(existing):
+        return api_error("The category order must include each category exactly once.", 400)
+    db.executemany("UPDATE categories SET position = ? WHERE id = ?", enumerate(ids))
+    db.commit()
+    return jsonify({"ids": ids})
+
+
+@api_bp.patch("/categories/<int:category_id>/collapsed")
+def update_category_collapsed(category_id):
+    payload = request.get_json(silent=True) or {}
+    collapsed = payload.get("collapsed")
+    if not isinstance(collapsed, bool):
+        return api_error("collapsed must be a boolean.", 400)
+    db = get_db()
+    result = db.execute(
+        "UPDATE categories SET collapsed = ? WHERE id = ?",
+        (int(collapsed), category_id),
+    )
+    db.commit()
+    if result.rowcount == 0:
+        return api_error("Category not found.", 404)
+    return jsonify({"id": category_id, "collapsed": collapsed})
+
+
+@api_bp.patch("/categories/<int:category_id>/color")
+def update_category_color(category_id):
+    payload = request.get_json(silent=True) or {}
+    color = str(payload.get("color", ""))
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None:
+        return api_error("Color must be a six-digit hexadecimal value.", 400)
+
+    db = get_db()
+    result = db.execute(
+        "UPDATE categories SET color = ? WHERE id = ?",
+        (color.lower(), category_id),
+    )
+    db.commit()
+    if result.rowcount == 0:
+        return api_error("Category not found.", 404)
+    return jsonify({"id": category_id, "color": color.lower()})
+
+
+@api_bp.post("/bookmarks")
+def create_bookmark():
+    return save_bookmark()
+
+
+@api_bp.put("/bookmarks/<int:bookmark_id>")
+def update_bookmark(bookmark_id):
+    return save_bookmark(bookmark_id)
+
+
+@api_bp.delete("/bookmarks/<int:bookmark_id>")
+def delete_bookmark(bookmark_id):
+    db = get_db()
+    result = db.execute("DELETE FROM bookmarks WHERE id = ?", (bookmark_id,))
+    db.commit()
+    if result.rowcount == 0:
+        return api_error("Bookmark not found.", 404)
+    return "", 204
+
+
+def save_bookmark(bookmark_id=None):
+    payload = request.get_json(silent=True) or {}
+    title = str(payload.get("title", "")).strip()
+    url = normalize_url(payload.get("url", ""))
+    category_id = payload.get("categoryId")
+    if not title or len(title) > 80:
+        return api_error("Bookmark names must be between 1 and 80 characters.", 400)
+    if not url:
+        return api_error("Enter a valid HTTP or HTTPS URL.", 400)
+    if isinstance(category_id, bool) or not isinstance(category_id, int):
+        return api_error("Choose a category.", 400)
+
+    db = get_db()
+    if db.execute("SELECT id FROM categories WHERE id = ?", (category_id,)).fetchone() is None:
+        return api_error("Category not found.", 404)
+
+    if bookmark_id is None:
+        cursor = db.execute(
+            "INSERT INTO bookmarks (title, url, category_id) VALUES (?, ?, ?)",
+            (title, url, category_id),
+        )
+        bookmark_id = cursor.lastrowid
+    else:
+        result = db.execute(
+            "UPDATE bookmarks SET title = ?, url = ?, category_id = ? WHERE id = ?",
+            (title, url, category_id, bookmark_id),
+        )
+        if result.rowcount == 0:
+            return api_error("Bookmark not found.", 404)
+    db.commit()
+    bookmark = db.execute(
+        """
+        SELECT bookmarks.id, bookmarks.title, bookmarks.url, bookmarks.category_id,
+               categories.name AS category, bookmarks.created_at
+        FROM bookmarks JOIN categories ON categories.id = bookmarks.category_id
+        WHERE bookmarks.id = ?
+        """,
+        (bookmark_id,),
+    ).fetchone()
+    return jsonify(dict(bookmark)), 201 if request.method == "POST" else 200
+
+
+def normalize_url(value):
+    raw = str(value).strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        parsed = urlsplit(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return ""
+        parsed.port
+        return urlunsplit(parsed)
+    except ValueError:
+        return ""
+
+
+def api_error(message, status):
+    return jsonify({"error": message}), status

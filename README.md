@@ -21,9 +21,10 @@ The app is configured for a single local user and binds to loopback by default. 
 
 ## Project structure
 
-- `app/__init__.py` creates the Flask app and defines the JSON API.
+- `app/__init__.py` creates the Flask app and registers routes.
+- `app/api.py` defines the JSON API blueprint.
 - `app/database.py` owns the SQLite connection, schema, and initial data.
 - `app/templates/` contains the server-rendered HTML shell.
-- `app/static/js/` contains the browser client.
-- `css/` contains the dashboard stylesheet.
+- `app/static/css/dashboard.css` contains the dashboard styles.
+- `app/static/js/dashboard.js` contains browser interactions and API calls.
 - `tests/` contains API behavior tests.
