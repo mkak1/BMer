@@ -8,7 +8,9 @@ const state = {
 
 const board = document.querySelector("#categoryBoard");
 const bookmarkModal = document.querySelector("#bookmarkModal");
+const categoryModal = document.querySelector("#categoryModal");
 const bookmarkForm = document.querySelector("#bookmarkForm");
+const categoryForm = document.querySelector("#categoryForm");
 const categorySelect = document.querySelector("#bookmarkCategory");
 const searchInput = document.querySelector("#searchInput");
 const errorMessage = document.querySelector("#errorMessage");
@@ -81,9 +83,26 @@ function render() {
       : left.index - right.index)
     .map(({ category }) => category);
 
-  board.replaceChildren(...matchingCategories.map((category) => renderCategory(category)));
+  board.replaceChildren(renderAddCategoryCard(), ...matchingCategories.map((category) => renderCategory(category)));
   board.classList.toggle("is-searching", Boolean(state.searchTerm));
   board.setAttribute("aria-busy", "false");
+}
+
+function renderAddCategoryCard() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "add-category-card";
+  button.dataset.action = "add-category";
+  button.setAttribute("aria-label", "Add category");
+
+  const icon = document.createElement("span");
+  icon.className = "add-category-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = "+";
+  const label = document.createElement("span");
+  label.textContent = "Add category";
+  button.append(icon, label);
+  return button;
 }
 
 function renderCategory(category) {
@@ -274,13 +293,32 @@ function closeModal() {
   state.editingBookmarkId = null;
 }
 
+function openCategoryModal() {
+  categoryForm.reset();
+  categoryModal.hidden = false;
+  categoryModal.setAttribute("aria-hidden", "false");
+  document.querySelector("#categoryNameInput").focus();
+}
+
+function closeCategoryModal() {
+  categoryModal.hidden = true;
+  categoryModal.setAttribute("aria-hidden", "true");
+  categoryForm.reset();
+}
+
 document.querySelector("#closeModalBtn").addEventListener("click", closeModal);
 document.querySelector("#cancelBtn").addEventListener("click", closeModal);
+document.querySelector("#closeCategoryModalBtn").addEventListener("click", closeCategoryModal);
+document.querySelector("#cancelCategoryBtn").addEventListener("click", closeCategoryModal);
 bookmarkModal.addEventListener("click", (event) => {
   if (event.target.dataset.close === "true") closeModal();
 });
+categoryModal.addEventListener("click", (event) => {
+  if (event.target.dataset.close === "true") closeCategoryModal();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !bookmarkModal.hidden) closeModal();
+  if (event.key === "Escape" && !categoryModal.hidden) closeCategoryModal();
 });
 
 searchInput.addEventListener("input", () => {
@@ -311,6 +349,19 @@ bookmarkForm.addEventListener("submit", async (event) => {
   }
 });
 
+categoryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = document.querySelector("#categoryNameInput").value.trim();
+  if (!name) return;
+
+  try {
+    await createCategory(name);
+    closeCategoryModal();
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
 // Capture edit/delete actions in one place so cards can be re-rendered freely.
 board.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]");
@@ -321,6 +372,8 @@ board.addEventListener("click", async (event) => {
   try {
     if (action.dataset.action === "add-bookmark") {
       openModal(null, categoryId);
+    } else if (action.dataset.action === "add-category") {
+      openCategoryModal();
     } else if (action.dataset.action === "edit") {
       const bookmark = state.bookmarks.find((item) => item.id === Number(action.dataset.bookmarkId));
       if (bookmark) openModal(bookmark);
@@ -346,19 +399,24 @@ document.querySelector("#addCategoryBtn").addEventListener("click", async () => 
   }
 
   try {
-    const category = await api("/api/categories", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    });
-    state.categories.push(category);
+    const category = await createCategory(name);
     input.value = "";
-    render();
     categorySelect.value = category.id;
-    showToast("Category created.");
   } catch (error) {
     showError(error.message);
   }
 });
+
+async function createCategory(name) {
+  const category = await api("/api/categories", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  state.categories.push(category);
+  render();
+  showToast("Category created.");
+  return category;
+}
 
 document.querySelector("#newCategoryInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter") {

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="BMer keeps your saved links organized and easy to revisit." />
     <title>BMer | Your saved links</title>
-    <link rel="stylesheet" href="{{ url_for('stylesheet', v=7) }}" />
-    <script src="{{ url_for('static', filename='js/app.js', v=7) }}" defer></script>
+    <link rel="stylesheet" href="{{ url_for('stylesheet', v=8) }}" />
+    <script src="{{ url_for('static', filename='js/app.js', v=8) }}" defer></script>
   </head>
   <body>
     <div class="page-shell">
@@ -49,6 +49,19 @@
           <label><span>Category</span><select id="bookmarkCategory" name="categoryId" required></select></label>
           <label class="new-category-row"><span>New category</span><span class="category-input-wrap"><input id="newCategoryInput" type="text" maxlength="40" placeholder="Name a collection" /><button id="addCategoryBtn" class="small-button" type="button">Create</button></span></label>
           <div class="form-actions"><button id="cancelBtn" class="secondary-button" type="button">Cancel</button><button id="submitBookmarkBtn" class="primary-button" type="submit">Add bookmark</button></div>
+        </form>
+      </section>
+    </div>
+    <div id="categoryModal" class="modal" aria-hidden="true" hidden>
+      <button class="modal-backdrop" type="button" data-close="true" aria-label="Close dialog"></button>
+      <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="categoryModalTitle">
+        <div class="modal-header">
+          <div><span class="eyebrow">Your library</span><h2 id="categoryModalTitle">Add category</h2></div>
+          <button id="closeCategoryModalBtn" class="close-button" type="button" aria-label="Close dialog">×</button>
+        </div>
+        <form id="categoryForm" class="bookmark-form">
+          <label><span>Category name</span><input id="categoryNameInput" name="categoryName" type="text" maxlength="40" placeholder="e.g. Research" required /></label>
+          <div class="form-actions"><button id="cancelCategoryBtn" class="secondary-button" type="button">Cancel</button><button class="primary-button" type="submit">Create category</button></div>
         </form>
       </section>
     </div>
