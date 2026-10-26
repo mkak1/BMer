@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="BMer keeps your saved links organized and easy to revisit." />
     <title>BMer | Your saved links</title>
-    <link rel="stylesheet" href="{{ url_for('stylesheet') }}" />
-    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+    <link rel="stylesheet" href="{{ url_for('stylesheet', v=7) }}" />
+    <script src="{{ url_for('static', filename='js/app.js', v=7) }}" defer></script>
   </head>
   <body>
     <div class="page-shell">
@@ -23,25 +23,12 @@
             <span class="sr-only">Search bookmarks</span>
             <input id="searchInput" type="search" placeholder="Search your library" autocomplete="off" />
           </label>
-          <button id="addBookmarkBtn" class="action-button" type="button" aria-label="Add bookmark" title="Add bookmark">+</button>
         </div>
       </header>
 
       <main class="content">
-        <section class="hero-panel" aria-labelledby="pageTitle">
-          <div class="hero-copy">
-            <span class="pill">A place for good finds</span>
-            <h1 id="pageTitle">Keep the links worth keeping.</h1>
-            <p>One considered home for everything you want to come back to.</p>
-          </div>
-          <div class="stats-grid" aria-label="Library totals">
-            <div class="stat-card"><strong id="bookmarkCount">0</strong><span>Bookmarks</span></div>
-            <div class="stat-card"><strong id="categoryCount">0</strong><span>Collections</span></div>
-          </div>
-        </section>
-
         <section class="library-heading" aria-label="Bookmark collections">
-          <div><span class="eyebrow">Your collection</span><h2>Browse by category</h2></div>
+          <div><span class="eyebrow">Your collection</span><h1>Browse by category</h1></div>
           <p id="resultSummary" aria-live="polite"></p>
         </section>
         <section id="categoryBoard" class="category-board" aria-live="polite" aria-busy="true"></section>
