@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="BMer keeps your saved links organized and easy to revisit." />
     <title>BMer | Your saved links</title>
-    <link rel="stylesheet" href="{{ url_for('stylesheet', v=9) }}" />
-    <script src="{{ url_for('static', filename='js/app.js', v=9) }}" defer></script>
+    <link rel="stylesheet" href="{{ url_for('stylesheet', v=12) }}" />
+    <script src="{{ url_for('static', filename='js/app.js', v=12) }}" defer></script>
   </head>
   <body>
     <div class="page-shell">
@@ -61,7 +61,7 @@
         </div>
         <form id="categoryForm" class="bookmark-form">
           <label><span>Category name</span><input id="categoryNameInput" name="categoryName" type="text" maxlength="40" placeholder="e.g. Research" required /></label>
-          <div class="form-actions"><button id="cancelCategoryBtn" class="secondary-button" type="button">Cancel</button><button class="primary-button" type="submit">Create category</button></div>
+          <div class="form-actions"><button id="cancelCategoryBtn" class="secondary-button" type="button">Cancel</button><button id="submitCategoryBtn" class="primary-button" type="submit">Create category</button></div>
         </form>
       </section>
     </div>

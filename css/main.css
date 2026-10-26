@@ -128,6 +128,7 @@ h1 {
 
 .category-board {
   display: grid;
+  align-items: start;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 18px;
 }
@@ -149,7 +150,8 @@ h1 {
 
 .add-category-card {
   display: flex;
-  min-height: 180px;
+  align-self: stretch;
+  min-height: 66px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -225,17 +227,60 @@ h1 {
 .category-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding: 18px 18px 14px;
+  padding: 8px 14px 8px 18px;
   background: color-mix(in srgb, var(--card-accent) 15%, rgba(148, 163, 184, 0.05));
+}
+
+.category-name-button {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.category-name-button:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+.category-header-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
   touch-action: none;
 }
 
-.category-header:focus-visible {
+.category-header-toggle:focus-visible,
+.category-color-picker:focus-visible,
+.category-delete-button:focus-visible {
   outline: 2px solid var(--accent-2);
-  outline-offset: -2px;
+  outline-offset: 2px;
+}
+
+.category-delete-button {
+  flex: 0 0 30px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.category-delete-button:hover {
+  border-color: rgba(251, 113, 133, 0.5);
+  background: rgba(251, 113, 133, 0.14);
+  color: #fecdd3;
 }
 
 .header-title {
@@ -244,12 +289,30 @@ h1 {
   gap: 10px;
 }
 
-.category-color {
-  width: 10px;
-  height: 10px;
+.category-color-picker {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
-  background: var(--card-accent, #8b5cf6);
-  box-shadow: 0 0 15px color-mix(in srgb, var(--card-accent) 78%, white 22%);
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.category-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.category-color-picker::-webkit-color-swatch {
+  border: 2px solid color-mix(in srgb, var(--card-accent) 80%, white 20%);
+  border-radius: 50%;
+}
+
+.category-color-picker::-moz-color-swatch {
+  border: 2px solid color-mix(in srgb, var(--card-accent) 80%, white 20%);
+  border-radius: 50%;
 }
 
 .category-header h3 {
@@ -580,16 +643,6 @@ h1 {
 .library-heading > p {
   margin: 0;
   color: var(--muted);
-}
-
-.category-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.category-header-actions .icon-button {
-  flex: 0 0 auto;
 }
 
 .category-toggle {
