@@ -3,10 +3,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
-from .database import close_db, get_db, init_db
-
-
-CATEGORY_COLORS = ["#8b5cf6", "#38bdf8", "#34d399", "#fbbf24", "#f472b6", "#fb7185"]
+from .database import close_db, generate_category_color, get_db, init_db
 
 
 def create_app(test_config=None):
@@ -70,7 +67,8 @@ def create_app(test_config=None):
 
         db = get_db()
         position = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM categories").fetchone()[0]
-        color = CATEGORY_COLORS[position % len(CATEGORY_COLORS)]
+        existing_colors = [row[0] for row in db.execute("SELECT color FROM categories")]
+        color = generate_category_color(existing_colors)
         try:
             cursor = db.execute(
                 "INSERT INTO categories (name, color, position) VALUES (?, ?, ?)",

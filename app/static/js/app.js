@@ -4,6 +4,7 @@ const state = {
   searchTerm: "",
   editingBookmarkId: null,
   pointerDrag: null,
+  suppressCategoryClick: false,
 };
 
 const board = document.querySelector("#categoryBoard");
@@ -111,9 +112,14 @@ function renderCategory(category) {
   card.className = "category-card";
   card.dataset.categoryId = category.id;
   card.style.setProperty("--card-accent", category.color);
+  const collapsed = Boolean(category.collapsed);
 
   const header = document.createElement("div");
   header.className = "category-header";
+  header.setAttribute("role", "button");
+  header.tabIndex = 0;
+  header.setAttribute("aria-expanded", String(!collapsed));
+  header.setAttribute("aria-controls", `category-body-${category.id}`);
 
   const titleWrap = document.createElement("div");
   titleWrap.className = "header-title";
@@ -133,7 +139,8 @@ function renderCategory(category) {
   header.append(titleWrap, headerActions);
 
   const body = document.createElement("div");
-  body.className = "category-body visible";
+  body.id = `category-body-${category.id}`;
+  body.className = `category-body ${collapsed ? "hidden" : "visible"}`;
   if (items.length) {
     const list = document.createElement("ul");
     list.className = "bookmark-list";
@@ -364,6 +371,28 @@ categoryForm.addEventListener("submit", async (event) => {
 
 // Capture edit/delete actions in one place so cards can be re-rendered freely.
 board.addEventListener("click", async (event) => {
+  const header = event.target.closest(".category-header");
+  if (header) {
+    if (state.suppressCategoryClick) {
+      state.suppressCategoryClick = false;
+      return;
+    }
+    const category = state.categories.find((item) => item.id === Number(header.closest(".category-card").dataset.categoryId));
+    if (!category) return;
+    category.collapsed = category.collapsed ? 0 : 1;
+    render();
+    try {
+      await api(`/api/categories/${category.id}/collapsed`, {
+        method: "PATCH",
+        body: JSON.stringify({ collapsed: Boolean(category.collapsed) }),
+      });
+    } catch (error) {
+      await loadState();
+      showError(error.message);
+    }
+    return;
+  }
+
   const action = event.target.closest("[data-action]");
   if (!action) return;
   const card = action.closest(".category-card");
@@ -430,9 +459,6 @@ board.addEventListener("pointerdown", (event) => {
   const header = event.target.closest(".category-header");
   const handle = event.target.closest(".drag-handle");
   if (!header || (event.target.closest("button") && !handle) || event.button !== 0) return;
-  event.preventDefault();
-  board.classList.add("is-reordering");
-  window.getSelection()?.removeAllRanges();
   const card = header.closest(".category-card");
   state.pointerDrag = {
     pointerId: event.pointerId,
@@ -447,6 +473,13 @@ board.addEventListener("pointerdown", (event) => {
     frameId: null,
     active: false,
   };
+});
+
+board.addEventListener("keydown", (event) => {
+  const header = event.target.closest(".category-header[role='button']");
+  if (!header || !["Enter", " "].includes(event.key)) return;
+  event.preventDefault();
+  header.click();
 });
 
 document.addEventListener("pointermove", (event) => {
@@ -471,6 +504,10 @@ document.addEventListener("pointerup", async (event) => {
   state.pointerDrag = null;
   board.classList.remove("is-reordering");
   if (!drag.active) return;
+  state.suppressCategoryClick = true;
+  window.setTimeout(() => {
+    state.suppressCategoryClick = false;
+  }, 0);
 
   drag.preview.remove();
   drag.placeholder.replaceWith(drag.card);
@@ -493,6 +530,8 @@ document.addEventListener("pointercancel", async () => {
 });
 
 function beginCategoryDrag(drag) {
+  board.classList.add("is-reordering");
+  window.getSelection()?.removeAllRanges();
   const rect = drag.card.getBoundingClientRect();
   const placeholder = document.createElement("article");
   placeholder.className = "category-drop-placeholder is-nearest";

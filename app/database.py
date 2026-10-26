@@ -1,15 +1,12 @@
+import colorsys
+import secrets
 import sqlite3
 from pathlib import Path
 
 from flask import current_app, g
 
 
-DEFAULT_CATEGORIES = [
-    ("Design", "#8b5cf6"),
-    ("Development", "#38bdf8"),
-    ("Productivity", "#34d399"),
-    ("Learning", "#fbbf24"),
-]
+DEFAULT_CATEGORIES = ["Design", "Development", "Productivity", "Learning"]
 
 DEFAULT_BOOKMARKS = [
     ("Figma", "https://www.figma.com", "Design"),
@@ -21,6 +18,33 @@ DEFAULT_BOOKMARKS = [
     ("Coursera", "https://www.coursera.org", "Learning"),
     ("YouTube Learning", "https://www.youtube.com", "Learning"),
 ]
+
+
+def generate_category_color(existing_colors=()):
+    used_colors = set(existing_colors)
+    existing_hues = [category_color_hue(color) for color in used_colors]
+    minimum_hue_gap = min(22 / 360, 0.9 / (len(existing_hues) + 1))
+    for _ in range(720):
+        hue = secrets.randbelow(360) / 360
+        if any(
+            min(abs(hue - existing), 1 - abs(hue - existing)) < minimum_hue_gap
+            for existing in existing_hues
+        ):
+            continue
+        lightness = (secrets.randbelow(10) + 64) / 100
+        saturation = (secrets.randbelow(20) + 58) / 100
+        red, green, blue = colorsys.hls_to_rgb(hue, lightness, saturation)
+        color = "#{:02x}{:02x}{:02x}".format(
+            round(red * 255), round(green * 255), round(blue * 255)
+        )
+        if color not in used_colors:
+            return color
+    raise RuntimeError("Unable to generate a distinct category color.")
+
+
+def category_color_hue(color):
+    red, green, blue = (int(color[index:index + 2], 16) / 255 for index in (1, 3, 5))
+    return colorsys.rgb_to_hls(red, green, blue)[0]
 
 
 def get_db():
@@ -62,11 +86,24 @@ def init_db():
     )
 
     category_count = db.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
+    color_schema_version = db.execute("PRAGMA user_version").fetchone()[0]
     if category_count == 0:
-        db.executemany(
-            "INSERT INTO categories (name, color, position) VALUES (?, ?, ?)",
-            [(name, color, position) for position, (name, color) in enumerate(DEFAULT_CATEGORIES)],
-        )
+        used_colors = set()
+        for position, name in enumerate(DEFAULT_CATEGORIES):
+            color = generate_category_color(used_colors)
+            db.execute(
+                "INSERT INTO categories (name, color, position) VALUES (?, ?, ?)",
+                (name, color, position),
+            )
+            used_colors.add(color)
+    elif color_schema_version < 2:
+        used_colors = set()
+        categories = db.execute("SELECT id FROM categories ORDER BY position, id").fetchall()
+        for category in categories:
+            color = generate_category_color(used_colors)
+            db.execute("UPDATE categories SET color = ? WHERE id = ?", (color, category["id"]))
+            used_colors.add(color)
+            db.execute("PRAGMA user_version = 2")
 
     bookmark_count = db.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0]
     if bookmark_count == 0:

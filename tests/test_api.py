@@ -1,3 +1,5 @@
+import colorsys
+import itertools
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,7 +56,17 @@ class BookmarkApiTests(unittest.TestCase):
     def test_persists_category_creation_order_and_collapse(self):
         created = self.client.post("/api/categories", json={"name": "Research"})
         self.assertEqual(created.status_code, 201)
-        category_id = created.get_json()["id"]
+        new_category = created.get_json()
+        category_id = new_category["id"]
+        self.assertRegex(new_category["color"], r"^#[0-9a-fA-F]{6}$")
+        colors = [item["color"] for item in self.state["categories"]] + [new_category["color"]]
+        hues = [
+            colorsys.rgb_to_hls(*(int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)))[0]
+            for color in colors
+        ]
+        for left, right in itertools.combinations(hues, 2):
+            hue_distance = min(abs(left - right), 1 - abs(left - right))
+            self.assertGreaterEqual(hue_distance, 20 / 360)
         category_ids = [item["id"] for item in self.state["categories"]] + [category_id]
 
         response = self.client.patch("/api/categories/order", json={"ids": list(reversed(category_ids))})
